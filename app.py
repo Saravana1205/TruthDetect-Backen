@@ -1,5 +1,8 @@
 import os
-import joblib  # 🔥 NEW: Imported to load your custom ML model
+import joblib 
+import requests
+import re
+from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -7,103 +10,85 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__)
 CORS(app)
 
-# Create a folder to save uploaded images/videos
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# ---------------- NEW: LOAD YOUR CUSTOM ML MODEL ----------------
 print("Waking up the AI...")
 try:
-    # Load the brain and the dictionary you trained in Colab!
     text_model = joblib.load('truthdetect_model.pkl')
     text_vectorizer = joblib.load('truthdetect_vectorizer.pkl')
     print("AI successfully loaded and ready!")
 except Exception as e:
-    print(f"⚠️ Error loading AI. Make sure the .pkl files are in this folder! Details: {e}")
+    print(f"⚠️ Error loading AI. Details: {e}")
     text_model = None
     text_vectorizer = None
 
+# 🔥 EXPLAINABLE AI HELPER FUNCTION
+def analyze_sentences(text):
+    """Breaks text into sentences and finds the most 'Fake' ones."""
+    sentences = re.split(r'(?<=[.!?]) +', text)
+    flagged_sentences = []
+    
+    for sentence in sentences:
+        if len(sentence) > 30: 
+            math_vector = text_vectorizer.transform([sentence])
+            prediction = text_model.predict(math_vector)[0]
+            
+            if prediction == 'FAKE':
+                flagged_sentences.append(sentence)
+                
+    return flagged_sentences[:2]
 
 @app.route('/', methods=['GET'])
 def home():
     return "TruthDetect ML Backend is Running!"
 
-
-# ---------------- UPDATED: REAL TEXT PREDICTION ENDPOINT ----------------
-@app.route('/predict-text', methods=['POST'])
-def predict_text():
+# 🔥 THE NEW SUPERCHARGED ENDPOINT (Handles Text AND URLs)
+@app.route('/predict', methods=['POST'])
+def predict():
     data = request.json
-    incoming_text = data.get('text', '')
+    incoming_input = data.get('text', '').strip()
     
-    if not incoming_text:
-        return jsonify({"error": "No text provided"}), 400
+    if not incoming_input:
+        return jsonify({"error": "No text or URL provided"}), 400
 
-    # Safety check in case the model didn't load
     if text_model is None or text_vectorizer is None:
         return jsonify({"error": "ML model not loaded on server"}), 500
 
     try:
-        # Step 1: Translate the incoming English text into mathematical vectors
-        math_vector = text_vectorizer.transform([incoming_text])
+        # 1. Is it a URL or just text?
+        if incoming_input.startswith("http://") or incoming_input.startswith("https://"):
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            web_response = requests.get(incoming_input, headers=headers)
+            soup = BeautifulSoup(web_response.text, 'html.parser')
+            paragraphs = soup.find_all('p')
+            full_text = " ".join([p.text for p in paragraphs])
+            source_type = "URL"
+        else:
+            full_text = incoming_input
+            source_type = "Text"
+
+        # 2. Analyze the whole text
+        math_vector = text_vectorizer.transform([full_text])
+        overall_prediction = text_model.predict(math_vector)[0]
+        result_string = str(overall_prediction).title()
         
-        # Step 2: Ask your trained model to predict FAKE or REAL
-        prediction = text_model.predict(math_vector)[0]
-        
-        # Format it nicely for your React Native app
-        result_string = str(prediction).title() # Turns "FAKE" to "Fake"
-        
+        # 3. EXPLAINABLE AI: Find the specific fake sentences!
+        red_flags = []
+        if result_string == "Fake":
+            red_flags = analyze_sentences(full_text)
+
         return jsonify({
             "result": result_string, 
-            "confidence": 92, # Estimated baseline confidence for this model
-            "explanation": f"Your custom ML model analyzed the linguistic patterns and classified this text as {result_string}."
+            "confidence": 92, 
+            "source": source_type,
+            "explanation": f"Analyzed {source_type}. The linguistic patterns suggest this is {result_string}.",
+            "flagged_sentences": red_flags
         })
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-# ---------------- IMAGE ENDPOINT (MOCK) ----------------
-@app.route('/predict-image', methods=['POST'])
-def predict_image():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
-        
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No file selected"}), 400
-
-    # Save the file securely
-    filename = secure_filename(file.filename)
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(filepath)
-    
-    # TODO: Pass 'filepath' to your real CNN model later.
-    return jsonify({
-        "result": "Real", 
-        "confidence": 95, 
-        "explanation": f"Image '{filename}' processed. No visual artifacts or abnormal pixel gradients detected in the facial region."
-    })
-
-
-# ---------------- VIDEO ENDPOINT (MOCK) ----------------
-@app.route('/predict-video', methods=['POST'])
-def predict_video():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
-        
-    file = request.files['file']
-    filename = secure_filename(file.filename)
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(filepath)
-    
-    # Mock video result
-    return jsonify({
-        "result": "Fake", 
-        "confidence": 97, 
-        "explanation": f"Video '{filename}' processed. Frame-by-frame temporal scan detected micro-expression jitter and lip-sync anomalies."
-    })
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
