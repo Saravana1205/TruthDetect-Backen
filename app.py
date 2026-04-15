@@ -35,7 +35,7 @@ except Exception as e:
 
 # 2. 🔥 NEW: Load IMAGE AI
 try:
-    image_model = load_model('truthdetect_image_model.h5')
+    image_model = load_model('truthdetect_image_model.keras')
     print("✅ Image AI loaded!")
 except Exception as e:
     print(f"⚠️ Image AI Error: {e}")
