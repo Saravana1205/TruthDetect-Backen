@@ -35,7 +35,8 @@ except Exception as e:
 
 # 2. 🔥 NEW: Load IMAGE AI
 try:
-    image_model = load_model('truthdetect_image_model.keras')
+    # 🔥 THE SILVER BULLET FIX: We added compile=False right here!
+    image_model = load_model('truthdetect_image_model.keras', compile=False)
     print("✅ Image AI loaded!")
 except Exception as e:
     print(f"⚠️ Image AI Error: {e}")
