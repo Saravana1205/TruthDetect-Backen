@@ -9,10 +9,12 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-# 🔥 NEW: Import TensorFlow to load your Computer Vision AI
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' # Hides annoying warning messages
+# Import TensorFlow
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 import tensorflow as tf
-from tensorflow.keras.models import load_model
+from tensorflow.keras.models import Model
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
 
 app = Flask(__name__)
 CORS(app)
@@ -33,15 +35,22 @@ except Exception as e:
     text_model = None
     text_vectorizer = None
 
-# 2. 🔥 NEW: Load IMAGE AI
+# 2. 🔥 LOAD IMAGE AI (THE NEW WAY)
 try:
-    # 🔥 THE SILVER BULLET FIX: We added compile=False right here!
-    image_model = load_model('truthdetect_image_model.keras', compile=False)
-    print("✅ Image AI loaded!")
+    print("Building empty brain structure...")
+    base_model = MobileNetV2(input_shape=(128, 128, 3), include_top=False, weights=None)
+    x = base_model.output
+    x = GlobalAveragePooling2D()(x)
+    predictions = Dense(1, activation='sigmoid')(x)
+    image_model = Model(inputs=base_model.input, outputs=predictions)
+
+    print("Pouring numbers into the brain...")
+    # This matches your new file name exactly!
+    image_model.load_weights('truthdetect.weights.h5')
+    print("✅ Image AI loaded successfully!")
 except Exception as e:
     print(f"⚠️ Image AI Error: {e}")
     image_model = None
-
 
 def analyze_sentences(text):
     sentences = re.split(r'(?<=[.!?]) +', text)
@@ -58,7 +67,6 @@ def analyze_sentences(text):
 def home():
     return "TruthDetect ML Backend is Running with Vision!"
 
-# ---------------- TEXT & URL ENDPOINT ----------------
 @app.route('/predict', methods=['POST'])
 def predict():
     data = request.json
@@ -97,8 +105,6 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-# ---------------- 🔥 NEW REAL IMAGE ENDPOINT ----------------
 @app.route('/predict-image', methods=['POST'])
 def predict_image():
     if image_model is None:
@@ -112,24 +118,18 @@ def predict_image():
         return jsonify({"error": "No file selected"}), 400
 
     try:
-        # Save the file securely
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        # 1. Open the image and resize it to 128x128 (just like we did in Colab!)
         img = Image.open(filepath).convert('RGB')
         img = img.resize((128, 128))
-        
-        # 2. Convert it into a math array for the AI
         img_array = np.array(img)
-        img_array = np.expand_dims(img_array, axis=0) # Make it a batch of 1
+        img_array = np.expand_dims(img_array, axis=0) 
         
-        # 3. Ask the AI to predict!
         prediction = image_model.predict(img_array)
         score = float(prediction[0][0])
         
-        # 4. Format the result
         if score > 0.5:
             result = "Real"
             confidence = round(score * 100, 1)
@@ -142,28 +142,8 @@ def predict_image():
             "confidence": confidence, 
             "explanation": f"Our Deep Learning CNN scanned the pixel gradients and artifacts, concluding it is {confidence}% likely to be {result}."
         })
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-# ---------------- VIDEO ENDPOINT (STILL MOCK) ----------------
-@app.route('/predict-video', methods=['POST'])
-def predict_video():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
-        
-    file = request.files['file']
-    filename = secure_filename(file.filename)
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(filepath)
-    
-    return jsonify({
-        "result": "Fake", 
-        "confidence": 97, 
-        "explanation": f"Video '{filename}' processed. Frame-by-frame temporal scan detected micro-expression jitter and lip-sync anomalies."
-    })
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
