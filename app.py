@@ -12,6 +12,11 @@ from werkzeug.utils import secure_filename
 # Import TensorFlow
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 import tensorflow as tf
+
+# 🔥 THE MEMORY FIX: Force TensorFlow to use less RAM so the server doesn't crash
+tf.config.threading.set_inter_op_parallelism_threads(1)
+tf.config.threading.set_intra_op_parallelism_threads(1)
+
 from tensorflow.keras.models import Model
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
@@ -35,7 +40,7 @@ except Exception as e:
     text_model = None
     text_vectorizer = None
 
-# 2. 🔥 LOAD IMAGE AI (THE NEW WAY)
+# 2. 🔥 LOAD IMAGE AI (THE CHEAT CODE METHOD)
 try:
     print("Building empty brain structure...")
     base_model = MobileNetV2(input_shape=(128, 128, 3), include_top=False, weights=None)
@@ -45,7 +50,7 @@ try:
     image_model = Model(inputs=base_model.input, outputs=predictions)
 
     print("Pouring numbers into the brain...")
-    # This matches your new file name exactly!
+    # This loads the NEW file you just downloaded!
     image_model.load_weights('truthdetect.weights.h5')
     print("✅ Image AI loaded successfully!")
 except Exception as e:
