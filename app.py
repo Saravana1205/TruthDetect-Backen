@@ -78,8 +78,13 @@ def generate_heatmap(img_array, model, filename):
 # --- 🚀 ROBUST MODEL INITIALIZATION ---
 def build_forensic_model():
     """Manual architecture build to bypass Keras 3 deserialization errors"""
+    # Initialize the base MobileNetV2 model
     base = MobileNetV2(input_shape=(128, 128, 3), include_top=False, weights=None)
-    x = GlobalAveragePooling2D()(base)
+    
+    # Correct way to chain layers in the Functional API:
+    # Use 'base.output' (the tensor), NOT 'base' (the model object)
+    x = GlobalAveragePooling2D()(base.output) 
+    
     out = Dense(1, activation='sigmoid')(x)
     return Model(inputs=base.input, outputs=out)
 
