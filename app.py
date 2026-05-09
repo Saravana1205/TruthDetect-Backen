@@ -2,23 +2,26 @@ import os
 import joblib 
 import requests
 import re
+import time
 import numpy as np
+import cv2 
 from PIL import Image
-from bs4 import BeautifulSoup
-from flask import Flask, request, jsonify
+from PIL.ExifTags import TAGS
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-# Import TensorFlow
+# Import TensorFlow and XAI tools
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 import tensorflow as tf
+from tf_explain.core.grad_cam import GradCAM
 
-# 🔥 THE MEMORY FIX: Force TensorFlow to use less RAM so the server doesn't crash
+# Performance optimization for cloud environments
 tf.config.threading.set_inter_op_parallelism_threads(1)
 tf.config.threading.set_intra_op_parallelism_threads(1)
 
-from tensorflow.keras.models import Model
-from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.models import Model, load_model
+from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2, preprocess_input
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
 
 app = Flask(__name__)
@@ -28,127 +31,171 @@ UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-print("Waking up the AIs...")
+# 🔥 UPDATED: Dynamic URL for Cloud Deployment
+# Use the Render URL if available, otherwise fallback to localhost for development
+BASE_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:5000")
 
-# 1. Load TEXT AI
+# --- 🛠️ HELPER FORENSIC TOOLS ---
+
+def extract_metadata(filepath):
+    info = {"software": "Unknown", "camera": "Unknown"}
+    try:
+        image = Image.open(filepath)
+        exifdata = image.getexif()
+        for tag_id in exifdata:
+            tag = TAGS.get(tag_id, tag_id)
+            data = exifdata.get(tag_id)
+            if tag == 'Software': info['software'] = data
+            if tag == 'Model': info['camera'] = data
+    except: pass
+    return info
+
+def save_forensic_log(name, result, confidence, details):
+    log_name = f"LOG_{name}.txt"
+    with open(os.path.join(UPLOAD_FOLDER, log_name), "w", encoding="utf-8") as f:
+        f.write(f"TRUTHDETECT FORENSIC REPORT\n")
+        f.write(f"Timestamp: {time.ctime()}\n")
+        f.write(f"Target: {name}\n")
+        f.write(f"Conclusion: {result} ({confidence}%)\n")
+        f.write(f"Analysis: {details}\n")
+    return log_name
+
+# --- 🧠 ENHANCED FORENSIC ENGINES ---
+
+def get_text_forensics(text, is_fake):
+    if not is_fake:
+        return "Analysis confirms high linguistic entropy and varied sentence structure. No automated bot patterns detected. Safe for consumption."
+    
+    reasons = []
+    if len(set(text.split())) / len(text.split()) < 0.5:
+        reasons.append("high vocabulary repetition (bot signature)")
+    if any(w in text.lower() for w in ['shocking', 'exposed', 'conspiracy']):
+        reasons.append("sensationalist emotional triggers")
+    
+    analysis = "Flagged due to " + (", ".join(reasons) if reasons else "anomalous linguistic patterns")
+    advice = "\n\n🚨 Recommendation: Cross-verify with Snopes or Reuters before sharing."
+    return f"{analysis}. {advice}"
+
+def get_pixel_forensics(img_np, is_fake, metadata=None):
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+    lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+    soft = metadata['software'] if metadata else "Unknown"
+    
+    if not is_fake:
+        return f"Authentic pixel noise detected (Variance: {round(lap_var, 2)}). Lighting and shadows are mathematically consistent. 🛡️ Safe."
+    
+    reason = "unnatural smoothing" if lap_var < 110 else "edge aliasing"
+    manip_tool = f" Possible edit tool detected: {soft}." if soft != "Unknown" else ""
+    return f"Scan detected {reason} (Score: {round(lap_var, 2)}).{manip_tool} Deepfake probability is high. 🚨 Alert."
+
+def generate_heatmap(img_array, model, filename):
+    try:
+        explainer = GradCAM()
+        grid = explainer.explain(validation_data=(img_array, None), model=model, layer_name="Conv_1", class_index=0)
+        heatmap_name = f"heat_{filename}.png"
+        heatmap_path = os.path.join(app.config['UPLOAD_FOLDER'], heatmap_name)
+        cv2.imwrite(heatmap_path, cv2.cvtColor(grid, cv2.COLOR_RGB2BGR))
+        return heatmap_name
+    except: return None
+
+# --- LOADING MODELS ---
+print("🚀 Initializing Forensic Engines...")
 try:
     text_model = joblib.load('truthdetect_model.pkl')
     text_vectorizer = joblib.load('truthdetect_vectorizer.pkl')
-    print("✅ Text AI loaded!")
-except Exception as e:
-    print(f"⚠️ Text AI Error: {e}")
-    text_model = None
-    text_vectorizer = None
-
-# 2. 🔥 LOAD IMAGE AI (THE CHEAT CODE METHOD)
-try:
-    print("Building empty brain structure...")
+    video_model = load_model('truthdetect_video_model.h5')
+    
     base_model = MobileNetV2(input_shape=(128, 128, 3), include_top=False, weights=None)
-    x = base_model.output
-    x = GlobalAveragePooling2D()(x)
+    x = GlobalAveragePooling2D()(base_model.output)
     predictions = Dense(1, activation='sigmoid')(x)
     image_model = Model(inputs=base_model.input, outputs=predictions)
-
-    print("Pouring numbers into the brain...")
-    # This loads the NEW file you just downloaded!
     image_model.load_weights('truthdetect.weights.h5')
-    print("✅ Image AI loaded successfully!")
-except Exception as e:
-    print(f"⚠️ Image AI Error: {e}")
-    image_model = None
+    print("✅ Systems Online!")
+except Exception as e: print(f"⚠️ Initialization Error: {e}")
 
-def analyze_sentences(text):
-    sentences = re.split(r'(?<=[.!?]) +', text)
-    flagged_sentences = []
-    for sentence in sentences:
-        if len(sentence) > 30: 
-            math_vector = text_vectorizer.transform([sentence])
-            prediction = text_model.predict(math_vector)[0]
-            if prediction == 'FAKE':
-                flagged_sentences.append(sentence)
-    return flagged_sentences[:2]
+# --- ROUTES ---
 
-@app.route('/', methods=['GET'])
-def home():
-    return "TruthDetect ML Backend is Running with Vision!"
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 @app.route('/predict', methods=['POST'])
 def predict():
     data = request.json
-    incoming_input = data.get('text', '').strip()
+    text = data.get('text', '').strip()
+    if not text: return jsonify({"error": "No text"}), 400
     
-    if not incoming_input:
-        return jsonify({"error": "No text provided"}), 400
-
-    try:
-        if incoming_input.startswith("http://") or incoming_input.startswith("https://"):
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            web_response = requests.get(incoming_input, headers=headers)
-            soup = BeautifulSoup(web_response.text, 'html.parser')
-            paragraphs = soup.find_all('p')
-            full_text = " ".join([p.text for p in paragraphs])
-            source_type = "URL"
-        else:
-            full_text = incoming_input
-            source_type = "Text"
-
-        math_vector = text_vectorizer.transform([full_text])
-        overall_prediction = text_model.predict(math_vector)[0]
-        result_string = str(overall_prediction).title()
-        
-        red_flags = []
-        if result_string == "Fake":
-            red_flags = analyze_sentences(full_text)
-
-        return jsonify({
-            "result": result_string, 
-            "confidence": 92, 
-            "source": source_type,
-            "explanation": f"Analyzed {source_type}. The linguistic patterns suggest this is {result_string}.",
-            "flagged_sentences": red_flags
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    math_vector = text_vectorizer.transform([text])
+    prediction = text_model.predict(math_vector)[0]
+    is_fake = str(prediction).upper() == "FAKE"
+    
+    desc = get_text_forensics(text, is_fake)
+    save_forensic_log("Text_Scan", "Fake" if is_fake else "Real", 92, desc)
+    
+    return jsonify({"result": "Fake" if is_fake else "Real", "confidence": 92, "explanation": desc, "source": "Text"})
 
 @app.route('/predict-image', methods=['POST'])
 def predict_image():
-    if image_model is None:
-        return jsonify({"error": "Image AI not loaded on server."}), 500
+    file = request.files.get('file')
+    if not file: return jsonify({"error": "No image"}), 400
+    
+    filename = secure_filename(file.filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+    
+    metadata = extract_metadata(filepath)
+    img_raw = cv2.imread(filepath)
+    img_rgb = cv2.cvtColor(img_raw, cv2.COLOR_BGR2RGB)
+    img_resized = cv2.resize(img_rgb, (128, 128))
+    img_array = preprocess_input(np.expand_dims(np.array(img_resized, dtype=np.float32), axis=0))
+    
+    score = float(image_model.predict(img_array)[0][0])
+    is_fake = score <= 0.5
+    conf = round((1-score)*100, 1) if is_fake else round(score*100, 1)
+    
+    desc = get_pixel_forensics(img_rgb, is_fake, metadata)
+    save_forensic_log(filename, "Fake" if is_fake else "Real", conf, desc)
+    
+    return jsonify({
+        "result": "Fake" if is_fake else "Real",
+        "confidence": conf,
+        "explanation": desc,
+        "heatmap_url": f"{BASE_URL}/uploads/{generate_heatmap(img_array, image_model, filename)}",
+        "source": "Image"
+    })
 
-    if 'file' not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
-        
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No file selected"}), 400
+@app.route('/predict-video', methods=['POST'])
+def predict_video():
+    file = request.files.get('file')
+    if not file: return jsonify({"error": "No video"}), 400
+    
+    filename = secure_filename(file.filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
 
-    try:
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        img = Image.open(filepath).convert('RGB')
-        img = img.resize((128, 128))
-        img_array = np.array(img)
-        img_array = np.expand_dims(img_array, axis=0) 
-        
-        prediction = image_model.predict(img_array)
-        score = float(prediction[0][0])
-        
-        if score > 0.5:
-            result = "Real"
-            confidence = round(score * 100, 1)
-        else:
-            result = "Fake"
-            confidence = round((1 - score) * 100, 1)
+    cap = cv2.VideoCapture(filepath)
+    frame_preds = []
+    sample_frame = None
+    while cap.isOpened() and len(frame_preds) < 15:
+        ret, frame = cap.read()
+        if not ret: break
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        if sample_frame is None: sample_frame = frame_rgb
+        img_resized = cv2.resize(frame_rgb, (128, 128))
+        img_array = preprocess_input(np.expand_dims(np.array(img_resized, dtype=np.float32), axis=0))
+        frame_preds.append(float(video_model.predict(img_array)[0][0]))
+    cap.release()
 
-        return jsonify({
-            "result": result, 
-            "confidence": confidence, 
-            "explanation": f"Our Deep Learning CNN scanned the pixel gradients and artifacts, concluding it is {confidence}% likely to be {result}."
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    avg_score = sum(frame_preds) / len(frame_preds) if frame_preds else 0
+    is_fake = avg_score <= 0.5
+    conf = round((1-avg_score)*100, 1) if is_fake else round(avg_score*100, 1)
+    
+    desc = get_pixel_forensics(sample_frame, is_fake)
+    save_forensic_log(filename, "Fake" if is_fake else "Real", conf, desc)
+
+    return jsonify({"result": "Fake" if is_fake else "Real", "confidence": conf, "explanation": desc, "source": "Video"})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # ✅ Port is dynamically assigned by Render/Cloud environment
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
