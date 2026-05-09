@@ -65,19 +65,6 @@ def save_forensic_log(name, result, confidence, details):
         f.write(f"Analysis: {details}\n")
     return log_name
 
-# --- 🧠 ENHANCED FORENSIC ENGINES ---
-
-def get_text_forensics(text, is_fake):
-    if not is_fake:
-        return "Analysis confirms high linguistic entropy. No automated bot patterns detected. Safe."
-    reasons = []
-    if len(set(text.split())) / len(text.split()) < 0.5:
-        reasons.append("high vocabulary repetition")
-    if any(w in text.lower() for w in ['shocking', 'exposed', 'conspiracy']):
-        reasons.append("sensationalist emotional triggers")
-    analysis = "Flagged due to " + (", ".join(reasons) if reasons else "anomalous linguistic patterns")
-    return f"{analysis}. Recommendation: Cross-verify before sharing."
-
 def get_pixel_forensics(img_np, is_fake, metadata=None):
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
@@ -98,21 +85,26 @@ def generate_heatmap(img_array, model, filename):
         return heatmap_name
     except: return None
 
-# --- LOADING MODELS ---
+# --- 🚀 ROBUST MODEL INITIALIZATION ---
+def build_forensic_model():
+    """Manual architecture build to bypass Keras 3 deserialization errors"""
+    base = MobileNetV2(input_shape=(128, 128, 3), include_top=False, weights=None)
+    x = GlobalAveragePooling2D()(base.output)
+    out = Dense(1, activation='sigmoid')(x)
+    return Model(inputs=base.input, outputs=out)
+
 print("🚀 Initializing Forensic Engines...")
 try:
-    # Load Text Models
+    # 1. Load Text Models
     text_model = joblib.load('truthdetect_model.pkl')
     text_vectorizer = joblib.load('truthdetect_vectorizer.pkl')
     
-    # 🔥 FIXED: Load Video Model with compile=False to bypass Dense layer metadata error
-    video_model = load_model('truthdetect_video_model.h5', compile=False)
+    # 2. Build and Load Video Model Weights (Manually bypassing the Dense error)
+    video_model = build_forensic_model()
+    video_model.load_weights('truthdetect_video_model.h5')
     
-    # Load Image Model Architecture and Weights
-    base_model = MobileNetV2(input_shape=(128, 128, 3), include_top=False, weights=None)
-    x = GlobalAveragePooling2D()(base_model.output)
-    predictions = Dense(1, activation='sigmoid')(x)
-    image_model = Model(inputs=base_model.input, outputs=predictions)
+    # 3. Build and Load Image Model Weights
+    image_model = build_forensic_model()
     image_model.load_weights('truthdetect.weights.h5')
     
     print("✅ Systems Online!")
@@ -134,9 +126,7 @@ def predict():
     math_vector = text_vectorizer.transform([text])
     prediction = text_model.predict(math_vector)[0]
     is_fake = str(prediction).upper() == "FAKE"
-    desc = get_text_forensics(text, is_fake)
-    save_forensic_log("Text_Scan", "Fake" if is_fake else "Real", 92, desc)
-    return jsonify({"result": "Fake" if is_fake else "Real", "confidence": 92, "explanation": desc, "source": "Text"})
+    return jsonify({"result": "Fake" if is_fake else "Real", "confidence": 92, "explanation": "Linguistic scan complete.", "source": "Text"})
 
 @app.route('/predict-image', methods=['POST'])
 def predict_image():
@@ -146,7 +136,6 @@ def predict_image():
     filename = secure_filename(file.filename)
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(filepath)
-    metadata = extract_metadata(filepath)
     img_raw = cv2.imread(filepath)
     img_rgb = cv2.cvtColor(img_raw, cv2.COLOR_BGR2RGB)
     img_resized = cv2.resize(img_rgb, (128, 128))
@@ -154,8 +143,7 @@ def predict_image():
     score = float(image_model.predict(img_array)[0][0])
     is_fake = score <= 0.5
     conf = round((1-score)*100, 1) if is_fake else round(score*100, 1)
-    desc = get_pixel_forensics(img_rgb, is_fake, metadata)
-    save_forensic_log(filename, "Fake" if is_fake else "Real", conf, desc)
+    desc = get_pixel_forensics(img_rgb, is_fake, extract_metadata(filepath))
     return jsonify({
         "result": "Fake" if is_fake else "Real",
         "confidence": conf,
@@ -174,22 +162,17 @@ def predict_video():
     file.save(filepath)
     cap = cv2.VideoCapture(filepath)
     frame_preds = []
-    sample_frame = None
     while cap.isOpened() and len(frame_preds) < 15:
         ret, frame = cap.read()
         if not ret: break
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        if sample_frame is None: sample_frame = frame_rgb
-        img_resized = cv2.resize(frame_rgb, (128, 128))
+        img_resized = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), (128, 128))
         img_array = preprocess_input(np.expand_dims(np.array(img_resized, dtype=np.float32), axis=0))
         frame_preds.append(float(video_model.predict(img_array)[0][0]))
     cap.release()
     avg_score = sum(frame_preds) / len(frame_preds) if frame_preds else 0
     is_fake = avg_score <= 0.5
     conf = round((1-avg_score)*100, 1) if is_fake else round(avg_score*100, 1)
-    desc = get_pixel_forensics(sample_frame, is_fake)
-    save_forensic_log(filename, "Fake" if is_fake else "Real", conf, desc)
-    return jsonify({"result": "Fake" if is_fake else "Real", "confidence": conf, "explanation": desc, "source": "Video"})
+    return jsonify({"result": "Fake" if is_fake else "Real", "confidence": conf, "explanation": "Temporal analysis complete.", "source": "Video"})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
