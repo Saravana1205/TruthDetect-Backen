@@ -32,8 +32,14 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # 🔥 UPDATED: Dynamic URL for Cloud Deployment
-# Use the Render URL if available, otherwise fallback to localhost for development
 BASE_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:5000")
+
+# --- 🧠 GLOBAL MODEL VARIABLES ---
+# Defining these as None ensures the routes can see them even if loading fails
+text_model = None
+text_vectorizer = None
+video_model = None
+image_model = None
 
 # --- 🛠️ HELPER FORENSIC TOOLS ---
 
@@ -101,17 +107,23 @@ def generate_heatmap(img_array, model, filename):
 # --- LOADING MODELS ---
 print("🚀 Initializing Forensic Engines...")
 try:
+    # 1. Load Text Analysis Models
     text_model = joblib.load('truthdetect_model.pkl')
     text_vectorizer = joblib.load('truthdetect_vectorizer.pkl')
+    
+    # 2. Load Video Analysis Model
     video_model = load_model('truthdetect_video_model.h5')
     
+    # 3. Initialize & Load Image Analysis Weights
     base_model = MobileNetV2(input_shape=(128, 128, 3), include_top=False, weights=None)
     x = GlobalAveragePooling2D()(base_model.output)
     predictions = Dense(1, activation='sigmoid')(x)
     image_model = Model(inputs=base_model.input, outputs=predictions)
     image_model.load_weights('truthdetect.weights.h5')
+    
     print("✅ Systems Online!")
-except Exception as e: print(f"⚠️ Initialization Error: {e}")
+except Exception as e: 
+    print(f"❌ CRITICAL Initialization Error: {e}")
 
 # --- ROUTES ---
 
@@ -121,6 +133,9 @@ def uploaded_file(filename):
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    if text_model is None or text_vectorizer is None:
+        return jsonify({"error": "NLP Engine not loaded"}), 503
+
     data = request.json
     text = data.get('text', '').strip()
     if not text: return jsonify({"error": "No text"}), 400
@@ -136,6 +151,10 @@ def predict():
 
 @app.route('/predict-image', methods=['POST'])
 def predict_image():
+    # 🔥 Fix for NameError: Checks if model exists before running
+    if image_model is None:
+        return jsonify({"error": "Image Engine not loaded. Check server logs."}), 503
+
     file = request.files.get('file')
     if not file: return jsonify({"error": "No image"}), 400
     
@@ -166,6 +185,9 @@ def predict_image():
 
 @app.route('/predict-video', methods=['POST'])
 def predict_video():
+    if video_model is None:
+        return jsonify({"error": "Video Engine not loaded"}), 503
+
     file = request.files.get('file')
     if not file: return jsonify({"error": "No video"}), 400
     
@@ -196,6 +218,5 @@ def predict_video():
     return jsonify({"result": "Fake" if is_fake else "Real", "confidence": conf, "explanation": desc, "source": "Video"})
 
 if __name__ == '__main__':
-    # ✅ Port is dynamically assigned by Render/Cloud environment
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
