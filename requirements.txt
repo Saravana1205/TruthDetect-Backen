@@ -1,30 +1,22 @@
-beautifulsoup4
-blinker
-certifi
-charset-normalizer
-click
-colorama
+# Web Server
 Flask
 flask-cors
 gunicorn
-idna
-itsdangerous
-Jinja2
-joblib
-MarkupSafe
-numpy==1.26.4
-packaging
-pandas
-python-dateutil
-requests
-scikit-learn==1.6.1
-scipy
-six
-soupsieve
-threadpoolctl
-typing_extensions
-tzdata
-urllib3
 Werkzeug
+
+# AI & Machine Learning
 tensorflow-cpu==2.16.1
+tf-explain
+joblib
+scikit-learn==1.6.1
+numpy==1.26.4
+pandas
+
+# Image & Forensic Processing
+opencv-python-headless
 Pillow
+
+# Networking & Utilities
+requests
+certifi
+urllib3
