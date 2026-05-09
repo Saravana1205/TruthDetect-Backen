@@ -5,11 +5,11 @@ gunicorn
 Werkzeug
 
 # AI & Machine Learning
-tensorflow-cpu==2.16.1
+tensorflow-cpu>=2.18.0
 tf-explain
 joblib
 scikit-learn==1.6.1
-numpy==1.26.4
+numpy<2.0.0
 pandas
 
 # Image & Forensic Processing
