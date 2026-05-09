@@ -55,16 +55,6 @@ def extract_metadata(filepath):
     except: pass
     return info
 
-def save_forensic_log(name, result, confidence, details):
-    log_name = f"LOG_{name}.txt"
-    with open(os.path.join(UPLOAD_FOLDER, log_name), "w", encoding="utf-8") as f:
-        f.write(f"TRUTHDETECT FORENSIC REPORT\n")
-        f.write(f"Timestamp: {time.ctime()}\n")
-        f.write(f"Target: {name}\n")
-        f.write(f"Conclusion: {result} ({confidence}%)\n")
-        f.write(f"Analysis: {details}\n")
-    return log_name
-
 def get_pixel_forensics(img_np, is_fake, metadata=None):
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
@@ -89,7 +79,7 @@ def generate_heatmap(img_array, model, filename):
 def build_forensic_model():
     """Manual architecture build to bypass Keras 3 deserialization errors"""
     base = MobileNetV2(input_shape=(128, 128, 3), include_top=False, weights=None)
-    x = GlobalAveragePooling2D()(base.output)
+    x = GlobalAveragePooling2D()(base)
     out = Dense(1, activation='sigmoid')(x)
     return Model(inputs=base.input, outputs=out)
 
@@ -112,10 +102,6 @@ except Exception as e:
     print(f"❌ CRITICAL Initialization Error: {e}")
 
 # --- ROUTES ---
-
-@app.route('/uploads/<filename>')
-def uploaded_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 @app.route('/predict', methods=['POST'])
 def predict():
