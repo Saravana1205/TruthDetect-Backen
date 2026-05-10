@@ -1,20 +1,13 @@
-# Web Server
 Flask
 flask-cors
 gunicorn
 Werkzeug
-
-# AI & Machine Learning - Optimized for Speed
 tensorflow-cpu>=2.18.0
 joblib
 scikit-learn==1.3.2
 numpy<2.0.0
-
-# Image & Forensic Processing
 opencv-python-headless
 Pillow
-
-# Utilities
 requests
 certifi
 urllib3
