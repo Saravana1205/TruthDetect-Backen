@@ -4,19 +4,17 @@ flask-cors
 gunicorn
 Werkzeug
 
-# AI & Machine Learning
+# AI & Machine Learning - Optimized for Speed
 tensorflow-cpu>=2.18.0
-tf-explain
 joblib
-scikit-learn==1.6.1
+scikit-learn==1.3.2
 numpy<2.0.0
-pandas
 
 # Image & Forensic Processing
 opencv-python-headless
 Pillow
 
-# Networking & Utilities
+# Utilities
 requests
 certifi
 urllib3
